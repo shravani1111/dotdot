@@ -5,10 +5,11 @@ import plotly.graph_objects as go
 from datetime import datetime, timedelta
 import numpy as np
 import hashlib
-import os
 import qrcode
 from io import BytesIO
 import base64
+import json
+import os
 
 # Page configuration
 st.set_page_config(
@@ -46,13 +47,13 @@ st.markdown("""
         transform: scale(1.02);
         box-shadow: 0 4px 8px rgba(0,0,0,0.2);
     }
-    .login-container {
+    .login-box {
         max-width: 400px;
         margin: 50px auto;
         padding: 30px;
-        background: white;
         border-radius: 15px;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        background: white;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.1);
     }
     </style>
 """, unsafe_allow_html=True)
@@ -61,97 +62,88 @@ st.markdown("""
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
 if 'username' not in st.session_state:
-    st.session_state.username = None
-if 'current_page' not in st.session_state:
-    st.session_state.current_page = 'Home'
+    st.session_state.username = ""
+if 'user_bookings' not in st.session_state:
+    st.session_state.user_bookings = []
 
-# User Management Functions
+# Helper Functions
 def hash_password(password):
+    """Hash password using SHA256"""
     return hashlib.sha256(password.encode()).hexdigest()
 
 def load_users():
     """Load users from text file"""
     users = {}
-    if os.path.exists('users.txt'):
-        with open('users.txt', 'r') as f:
-            for line in f:
-                if line.strip():
-                    parts = line.strip().split('|')
-                    # Safely handle older or malformed lines
-                    if len(parts) >= 3:
-                        username = parts[0]
-                        password = parts[1]
-                        email = parts[2]
-                        timestamp = parts[3] if len(parts) > 3 else None
-                        users[username] = {
-                            'password': password,
-                            'email': email,
-                            'timestamp': timestamp
-                        }
-                    else:
-                        print(f"⚠️ Skipping malformed line: {line.strip()}")
+    try:
+        if os.path.exists('users.txt'):
+            with open('users.txt', 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if line and ',' in line:  # Check if line is valid
+                        parts = line.split(',')
+                        if len(parts) >= 2:
+                            username = parts[0]
+                            password = parts[1]
+                            users[username] = password
+    except Exception as e:
+        st.error(f"Error loading users: {e}")
     return users
 
-
-def save_user(username, password, email):
-    """Save new user to text file with timestamp"""
-    from datetime import datetime
-    timestamp = datetime.now()
-    with open('users.txt', 'a') as f:
-        f.write(f"{username}|{hash_password(password)}|{email}|{timestamp}\n")
-
-def load_bookings():
-    """Load all bookings from text file"""
-    bookings = []
-    if os.path.exists('bookings.txt'):
-        with open('bookings.txt', 'r') as f:
-            for line in f:
-                if line.strip():
-                    parts = line.strip().split('|')
-                    if len(parts) == 9:
-                        bookings.append({
-                            'booking_id': parts[0],
-                            'username': parts[1],
-                            'museum': parts[2],
-                            'date': parts[3],
-                            'time': parts[4],
-                            'people': parts[5],
-                            'tour_type': parts[6],
-                            'booking_date': parts[7],
-                            'status': parts[8]
-                        })
-    return bookings
+def save_user(username, password):
+    """Save new user to text file"""
+    try:
+        with open('users.txt', 'a') as f:
+            f.write(f"{username},{hash_password(password)}\n")
+        return True
+    except Exception as e:
+        st.error(f"Error saving user: {e}")
+        return False
 
 def save_booking(booking_data):
     """Save booking to text file"""
-    with open('bookings.txt', 'a') as f:
-        f.write(f"{booking_data['booking_id']}|{booking_data['username']}|{booking_data['museum']}|"
-                f"{booking_data['date']}|{booking_data['time']}|{booking_data['people']}|"
-                f"{booking_data['tour_type']}|{booking_data['booking_date']}|{booking_data['status']}\n")
+    try:
+        with open('bookings.txt', 'a') as f:
+            f.write(json.dumps(booking_data) + '\n')
+        return True
+    except Exception as e:
+        st.error(f"Error saving booking: {e}")
+        return False
 
-def generate_qr_code(booking_data):
+def load_user_bookings(username):
+    """Load bookings for specific user"""
+    bookings = []
+    try:
+        if os.path.exists('bookings.txt'):
+            with open('bookings.txt', 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        try:
+                            booking = json.loads(line)
+                            if booking.get('username') == username:
+                                bookings.append(booking)
+                        except json.JSONDecodeError:
+                            continue
+    except Exception as e:
+        st.error(f"Error loading bookings: {e}")
+    return bookings
+
+def generate_qr_code(data):
     """Generate QR code for booking"""
-    qr_data = f"""
-    Booking ID: {booking_data['booking_id']}
-    Museum: {booking_data['museum']}
-    Date: {booking_data['date']}
-    Time: {booking_data['time']}
-    People: {booking_data['people']}
-    Tour Type: {booking_data['tour_type']}
-    """
-    
-    qr = qrcode.QRCode(version=1, box_size=10, border=5)
-    qr.add_data(qr_data)
-    qr.make(fit=True)
-    
-    img = qr.make_image(fill_color="black", back_color="white")
-    
-    # Convert to base64
-    buffered = BytesIO()
-    img.save(buffered, format="PNG")
-    img_str = base64.b64encode(buffered.getvalue()).decode()
-    
-    return img_str
+    try:
+        qr = qrcode.QRCode(version=1, box_size=10, border=5)
+        qr.add_data(json.dumps(data))
+        qr.make(fit=True)
+        img = qr.make_image(fill_color="black", back_color="white")
+        
+        # Convert to base64
+        buffered = BytesIO()
+        img.save(buffered, format="PNG")
+        img_str = base64.b64encode(buffered.getvalue()).decode()
+        return img_str
+    except Exception as e:
+        st.error(f"Error generating QR code: {e}")
+        return None
 
 # Load actual data from CSV files
 @st.cache_data
@@ -181,73 +173,80 @@ def load_data():
         st.error(f"Error loading data: {e}")
         return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
-# Login/Register Page
+# LOGIN/SIGNUP PAGE
 def show_login_page():
     st.markdown('<div class="main-header">🏛️ Virtual Museum Management System</div>', unsafe_allow_html=True)
     
-    tab1, tab2 = st.tabs(["Login", "Register"])
+    col1, col2, col3 = st.columns([1, 2, 1])
     
-    with tab1:
-        st.markdown('<div class="login-container">', unsafe_allow_html=True)
-        st.subheader("Login to Your Account")
+    with col2:
+        tab1, tab2 = st.tabs(["Login", "Sign Up"])
         
-        username = st.text_input("Username", key="login_username")
-        password = st.text_input("Password", type="password", key="login_password")
-        
-        if st.button("Login", use_container_width=True):
-            users = load_users()
-            if username in users and users[username]['password'] == hash_password(password):
-                st.session_state.logged_in = True
-                st.session_state.username = username
-                st.success("Login successful!")
-                st.rerun()
-            else:
-                st.error("Invalid username or password")
-        
-        st.markdown('</div>', unsafe_allow_html=True)
-    
-    with tab2:
-        st.markdown('<div class="login-container">', unsafe_allow_html=True)
-        st.subheader("Create New Account")
-        
-        new_username = st.text_input("Username", key="reg_username")
-        new_email = st.text_input("Email", key="reg_email")
-        new_password = st.text_input("Password", type="password", key="reg_password")
-        confirm_password = st.text_input("Confirm Password", type="password", key="reg_confirm")
-        
-        if st.button("Register", use_container_width=True):
-            users = load_users()
+        with tab1:
+            st.markdown('<div class="login-box">', unsafe_allow_html=True)
+            st.subheader("🔐 Login")
             
-            if not new_username or not new_email or not new_password:
-                st.error("Please fill all fields")
-            elif new_username in users:
-                st.error("Username already exists")
-            elif new_password != confirm_password:
-                st.error("Passwords do not match")
-            elif len(new_password) < 6:
-                st.error("Password must be at least 6 characters")
-            else:
-                save_user(new_username, new_password, new_email)
-                st.success("Registration successful! Please login.")
+            username = st.text_input("Username", key="login_username")
+            password = st.text_input("Password", type="password", key="login_password")
+            
+            if st.button("Login", use_container_width=True):
+                if username and password:
+                    users = load_users()
+                    if username in users and users[username] == hash_password(password):
+                        st.session_state.logged_in = True
+                        st.session_state.username = username
+                        st.session_state.user_bookings = load_user_bookings(username)
+                        st.success("Login successful!")
+                        st.rerun()
+                    else:
+                        st.error("Invalid username or password")
+                else:
+                    st.warning("Please enter username and password")
+            
+            st.markdown('</div>', unsafe_allow_html=True)
         
-        st.markdown('</div>', unsafe_allow_html=True)
+        with tab2:
+            st.markdown('<div class="login-box">', unsafe_allow_html=True)
+            st.subheader("📝 Create Account")
+            
+            new_username = st.text_input("Choose Username", key="signup_username")
+            new_password = st.text_input("Choose Password", type="password", key="signup_password")
+            confirm_password = st.text_input("Confirm Password", type="password", key="confirm_password")
+            
+            if st.button("Sign Up", use_container_width=True):
+                if not new_username or not new_password:
+                    st.error("Please fill all fields")
+                elif len(new_password) < 6:
+                    st.error("Password must be at least 6 characters")
+                elif new_password != confirm_password:
+                    st.error("Passwords don't match")
+                elif new_username in load_users():
+                    st.error("Username already exists")
+                else:
+                    if save_user(new_username, new_password):
+                        st.success("Account created successfully! Please login.")
+                    else:
+                        st.error("Error creating account. Please try again.")
+            
+            st.markdown('</div>', unsafe_allow_html=True)
 
-# Main App
+# MAIN APPLICATION
 if not st.session_state.logged_in:
     show_login_page()
 else:
     museums_df, bookings_df, foreign_df = load_data()
     
-    # Sidebar navigation with logout
-    st.sidebar.title(f"🏛️ Welcome, {st.session_state.username}!")
+    # Sidebar navigation
+    st.sidebar.title(f"👤 Welcome, {st.session_state.username}!")
     
-    if st.sidebar.button("Logout", use_container_width=True):
+    if st.sidebar.button("🚪 Logout"):
         st.session_state.logged_in = False
-        st.session_state.username = None
+        st.session_state.username = ""
+        st.session_state.user_bookings = []
         st.rerun()
     
     st.sidebar.markdown("---")
-    page = st.sidebar.radio("Go to", ["Home", "Platform Statistics", "Gallery", "Museum Maps", "Book Ticket", "My Bookings", "Viewer Page"])
+    page = st.sidebar.radio("Navigate", ["Home", "Book Museum", "My Bookings", "Platform Statistics", "Gallery", "Museum Maps", "Viewer Page"])
 
     # ==================== HOME PAGE ====================
     if page == "Home":
@@ -256,8 +255,8 @@ else:
         
         total_museums = len(museums_df)
         total_bookings = len(bookings_df)
-        total_foreign_visitors = foreign_df['Visitors'].sum() if not foreign_df.empty else 0
-        avg_people = bookings_df['People'].mean() if not bookings_df.empty else 0
+        total_foreign_visitors = foreign_df['Visitors'].sum() if not foreign_df.empty and 'Visitors' in foreign_df.columns else 0
+        avg_people = bookings_df['People'].mean() if not bookings_df.empty and 'People' in bookings_df.columns else 0
         
         col1, col2, col3, col4 = st.columns(4)
         
@@ -272,8 +271,8 @@ else:
         with col2:
             st.markdown(f"""
                 <div class="stat-card">
-                    <h2>{total_bookings:,}</h2>
-                    <p>Total Bookings</p>
+                    <h2>{len(st.session_state.user_bookings)}</h2>
+                    <p>Your Bookings</p>
                 </div>
             """, unsafe_allow_html=True)
         
@@ -281,7 +280,7 @@ else:
             st.markdown(f"""
                 <div class="stat-card">
                     <h2>{int(total_foreign_visitors):,}</h2>
-                    <p>Foreign Visitors (2014-2024)</p>
+                    <p>Foreign Visitors</p>
                 </div>
             """, unsafe_allow_html=True)
         
@@ -299,7 +298,7 @@ else:
         
         with col1:
             st.subheader("📊 Museums by Type")
-            if not museums_df.empty:
+            if not museums_df.empty and 'Type' in museums_df.columns:
                 type_counts = museums_df['Type'].value_counts().head(15)
                 fig = px.bar(
                     x=type_counts.values,
@@ -314,7 +313,7 @@ else:
         
         with col2:
             st.subheader("🎯 Top States")
-            if not museums_df.empty:
+            if not museums_df.empty and 'State' in museums_df.columns:
                 state_counts = museums_df['State'].value_counts().head(10)
                 fig = px.pie(
                     values=state_counts.values,
@@ -324,25 +323,195 @@ else:
                 fig.update_layout(height=400, showlegend=True)
                 st.plotly_chart(fig, use_container_width=True)
         
-        st.subheader("📈 Foreign Visitors Trend (2014-2024)")
-        if not foreign_df.empty and 'Year' in foreign_df.columns:
-            yearly_visitors = foreign_df.groupby('Year')['Visitors'].sum().reset_index()
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(
-                x=yearly_visitors['Year'],
-                y=yearly_visitors['Visitors'],
-                mode='lines+markers',
-                name='Foreign Visitors',
-                line=dict(color='#1f77b4', width=3),
-                fill='tozeroy'
-            ))
+        st.subheader("🗺️ Museum Network Overview")
+        if not museums_df.empty:
+            fig = px.scatter_mapbox(
+                museums_df.head(100),
+                lat='Latitude',
+                lon='Longitude',
+                hover_name='Name',
+                hover_data={'City': True, 'State': True, 'Type': True, 'Latitude': False, 'Longitude': False},
+                color='Type',
+                size_max=15,
+                zoom=4,
+                height=500
+            )
             fig.update_layout(
-                height=400,
-                xaxis_title="Year",
-                yaxis_title="Total Visitors",
-                hovermode='x unified'
+                mapbox_style="open-street-map",
+                margin={"r": 0, "t": 0, "l": 0, "b": 0}
             )
             st.plotly_chart(fig, use_container_width=True)
+
+    # ==================== BOOK MUSEUM ====================
+    elif page == "Book Museum":
+        st.markdown('<div class="main-header">🎫 Book Museum Visit</div>', unsafe_allow_html=True)
+        
+        if not museums_df.empty:
+            col1, col2 = st.columns([2, 1])
+            
+            with col1:
+                st.subheader("Select Museum")
+                
+                # Filters
+                states_list = ['All'] + sorted(museums_df['State'].dropna().unique().tolist())
+                selected_state = st.selectbox("Filter by State", states_list)
+                
+                filtered_museums = museums_df.copy()
+                if selected_state != 'All':
+                    filtered_museums = filtered_museums[filtered_museums['State'] == selected_state]
+                
+                if len(filtered_museums) > 0:
+                    selected_museum_name = st.selectbox("Choose Museum", filtered_museums['Name'].tolist())
+                    selected_museum = filtered_museums[filtered_museums['Name'] == selected_museum_name].iloc[0]
+                    
+                    # Display museum details
+                    st.info(f"""
+                    **Museum:** {selected_museum['Name']}
+                    
+                    **Location:** {selected_museum['City']}, {selected_museum['State']}
+                    
+                    **Type:** {selected_museum['Type']}
+                    """)
+                    
+                    # Booking form
+                    st.subheader("Booking Details")
+                    
+                    booking_date = st.date_input("Select Date", min_value=datetime.now().date())
+                    booking_time = st.time_input("Select Time")
+                    num_people = st.number_input("Number of People", min_value=1, max_value=50, value=1)
+                    tour_type = st.selectbox("Tour Type", ["Self-Guided", "Guided Tour", "Virtual Tour", "Audio Tour"])
+                    
+                    contact_name = st.text_input("Contact Name", value=st.session_state.username)
+                    contact_email = st.text_input("Email")
+                    contact_phone = st.text_input("Phone Number")
+                    
+                    special_requests = st.text_area("Special Requests (Optional)")
+                    
+                    if st.button("🎫 Confirm Booking", use_container_width=True):
+                        if contact_email and contact_phone:
+                            # Generate booking ID
+                            booking_id = f"BK{datetime.now().strftime('%Y%m%d%H%M%S')}"
+                            
+                            # Create booking data
+                            booking_data = {
+                                'booking_id': booking_id,
+                                'username': st.session_state.username,
+                                'museum_name': selected_museum['Name'],
+                                'museum_city': selected_museum['City'],
+                                'museum_state': selected_museum['State'],
+                                'museum_type': selected_museum['Type'],
+                                'date': str(booking_date),
+                                'time': str(booking_time),
+                                'num_people': int(num_people),
+                                'tour_type': tour_type,
+                                'contact_name': contact_name,
+                                'contact_email': contact_email,
+                                'contact_phone': contact_phone,
+                                'special_requests': special_requests,
+                                'booking_timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                            }
+                            
+                            # Save booking
+                            if save_booking(booking_data):
+                                st.session_state.user_bookings = load_user_bookings(st.session_state.username)
+                                
+                                st.success(f"✅ Booking Confirmed! Booking ID: {booking_id}")
+                                st.balloons()
+                                
+                                # Generate QR Code
+                                qr_img = generate_qr_code(booking_data)
+                                if qr_img:
+                                    st.image(f"data:image/png;base64,{qr_img}", caption="Scan QR Code for Booking Details", width=300)
+                                    st.info("📱 Save this QR code for museum entry")
+                            else:
+                                st.error("Error saving booking. Please try again.")
+                        else:
+                            st.error("Please fill in all required fields")
+                else:
+                    st.warning("No museums found in selected state")
+            
+            with col2:
+                st.subheader("📍 Museum Location")
+                if len(filtered_museums) > 0 and pd.notna(selected_museum['Latitude']) and pd.notna(selected_museum['Longitude']):
+                    map_df = pd.DataFrame({
+                        'lat': [selected_museum['Latitude']],
+                        'lon': [selected_museum['Longitude']],
+                        'name': [selected_museum['Name']]
+                    })
+                    
+                    fig = px.scatter_mapbox(
+                        map_df,
+                        lat='lat',
+                        lon='lon',
+                        hover_name='name',
+                        zoom=12,
+                        height=400
+                    )
+                    fig.update_layout(
+                        mapbox_style="open-street-map",
+                        margin={"r": 0, "t": 0, "l": 0, "b": 0}
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+                
+                st.markdown("---")
+                st.subheader("💡 Booking Tips")
+                st.info("""
+                - Book at least 24 hours in advance
+                - Arrive 15 minutes before your slot
+                - Carry valid ID proof
+                - Follow museum guidelines
+                - Keep your QR code handy
+                """)
+
+    # ==================== MY BOOKINGS ====================
+    elif page == "My Bookings":
+        st.markdown('<div class="main-header">📋 My Bookings</div>', unsafe_allow_html=True)
+        
+        # Reload bookings
+        st.session_state.user_bookings = load_user_bookings(st.session_state.username)
+        user_bookings = st.session_state.user_bookings
+        
+        if len(user_bookings) == 0:
+            st.info("You don't have any bookings yet. Book your first museum visit!")
+            if st.button("🎫 Book Now"):
+                st.info("Go to 'Book Museum' page")
+        else:
+            st.success(f"You have {len(user_bookings)} booking(s)")
+            
+            for idx, booking in enumerate(user_bookings):
+                with st.expander(f"🎫 Booking #{idx+1} - {booking['museum_name']}", expanded=(idx==0)):
+                    col1, col2 = st.columns([2, 1])
+                    
+                    with col1:
+                        st.subheader("Booking Details")
+                        st.write(f"**Booking ID:** {booking['booking_id']}")
+                        st.write(f"**Museum:** {booking['museum_name']}")
+                        st.write(f"**Location:** {booking['museum_city']}, {booking['museum_state']}")
+                        st.write(f"**Type:** {booking['museum_type']}")
+                        st.write(f"**Date:** {booking['date']}")
+                        st.write(f"**Time:** {booking['time']}")
+                        st.write(f"**Number of People:** {booking['num_people']}")
+                        st.write(f"**Tour Type:** {booking['tour_type']}")
+                        st.write(f"**Contact:** {booking['contact_name']}")
+                        st.write(f"**Email:** {booking['contact_email']}")
+                        st.write(f"**Phone:** {booking['contact_phone']}")
+                        if booking.get('special_requests'):
+                            st.write(f"**Special Requests:** {booking['special_requests']}")
+                        st.write(f"**Booked On:** {booking['booking_timestamp']}")
+                    
+                    with col2:
+                        st.subheader("QR Code")
+                        qr_img = generate_qr_code(booking)
+                        if qr_img:
+                            st.image(f"data:image/png;base64,{qr_img}", caption="Show at Entry", width=250)
+                            
+                            st.download_button(
+                                label="📥 Download QR Code",
+                                data=base64.b64decode(qr_img),
+                                file_name=f"booking_{booking['booking_id']}.png",
+                                mime="image/png",
+                                key=f"download_{idx}"
+                            )
 
     # ==================== PLATFORM STATISTICS ====================
     elif page == "Platform Statistics":
@@ -351,20 +520,20 @@ else:
         col1, col2, col3 = st.columns(3)
         with col1:
             if not foreign_df.empty and 'Year' in foreign_df.columns:
-                years = sorted(foreign_df['Year'].unique())
-                selected_year = st.selectbox("Select Year", years, index=len(years)-1)
+                years = sorted(foreign_df['Year'].dropna().unique())
+                selected_year = st.selectbox("Select Year", years, index=len(years)-1 if len(years) > 0 else 0)
             else:
                 selected_year = 2024
         
         with col2:
-            if not museums_df.empty:
+            if not museums_df.empty and 'State' in museums_df.columns:
                 states = ['All'] + sorted(museums_df['State'].dropna().unique().tolist())
                 selected_state = st.selectbox("Select State", states)
             else:
                 selected_state = 'All'
         
         with col3:
-            if not museums_df.empty:
+            if not museums_df.empty and 'Type' in museums_df.columns:
                 types = ['All'] + sorted(museums_df['Type'].dropna().unique().tolist())
                 selected_type = st.selectbox("Museum Type", types)
             else:
@@ -376,26 +545,20 @@ else:
         if selected_type != 'All':
             filtered_museums = filtered_museums[filtered_museums['Type'] == selected_type]
         
-        col1, col2, col3, col4, col5 = st.columns(5)
+        col1, col2, col3, col4 = st.columns(4)
         
         with col1:
             col1.metric("Total Museums", len(filtered_museums))
         
         with col2:
-            if not foreign_df.empty:
+            if not foreign_df.empty and 'Visitors' in foreign_df.columns:
                 year_visitors = foreign_df[foreign_df['Year'] == selected_year]['Visitors'].sum()
                 col2.metric("Foreign Visitors", f"{int(year_visitors):,}")
             else:
                 col2.metric("Foreign Visitors", "N/A")
         
         with col3:
-            if not bookings_df.empty:
-                attended = bookings_df[bookings_df['Attended'] == 'Yes'].shape[0] if 'Attended' in bookings_df.columns else 0
-                total = bookings_df.shape[0]
-                rate = (attended / total * 100) if total > 0 else 0
-                col3.metric("Attendance Rate", f"{rate:.1f}%")
-            else:
-                col3.metric("Attendance Rate", "N/A")
+            col3.metric("Your Bookings", len(st.session_state.user_bookings))
         
         with col4:
             if not bookings_df.empty and 'People' in bookings_df.columns:
@@ -404,12 +567,66 @@ else:
             else:
                 col4.metric("Avg Group Size", "N/A")
         
-        with col5:
-            if not bookings_df.empty and 'Rating' in bookings_df.columns:
-                avg_rating = bookings_df['Rating'].dropna().mean()
-                col5.metric("Avg Rating", f"{avg_rating:.1f}⭐" if not pd.isna(avg_rating) else "N/A")
-            else:
-                col5.metric("Avg Rating", "N/A")
+        st.markdown("---")
+        
+        tab1, tab2 = st.tabs(["📈 Visitor Analytics", "🗺️ Geographic Analysis"])
+        
+        with tab1:
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.subheader("Foreign Visitors by District")
+                if not foreign_df.empty and 'District' in foreign_df.columns and selected_year in foreign_df['Year'].values:
+                    year_data = foreign_df[foreign_df['Year'] == selected_year]
+                    district_visitors = year_data.groupby('District')['Visitors'].sum().sort_values(ascending=False).head(15)
+                    
+                    fig = px.bar(
+                        x=district_visitors.values,
+                        y=district_visitors.index,
+                        orientation='h',
+                        labels={'x': 'Total Visitors', 'y': 'District'},
+                        color=district_visitors.values,
+                        color_continuous_scale='Blues'
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+            
+            with col2:
+                st.subheader("Monthly Visitor Pattern")
+                if not foreign_df.empty and 'Month' in foreign_df.columns:
+                    year_data = foreign_df[foreign_df['Year'] == selected_year]
+                    month_order = ['January', 'February', 'March', 'April', 'May', 'June', 
+                                  'July', 'August', 'September', 'October', 'November', 'December']
+                    monthly_visitors = year_data.groupby('Month')['Visitors'].sum().reindex(month_order, fill_value=0)
+                    
+                    fig = go.Figure(go.Scatter(
+                        x=monthly_visitors.index,
+                        y=monthly_visitors.values,
+                        mode='lines+markers',
+                        fill='tozeroy',
+                        line=dict(color='coral', width=3)
+                    ))
+                    fig.update_layout(xaxis_title="Month", yaxis_title="Visitors")
+                    st.plotly_chart(fig, use_container_width=True)
+        
+        with tab2:
+            st.subheader("Museums Distribution Map")
+            if not filtered_museums.empty:
+                fig = px.scatter_mapbox(
+                    filtered_museums,
+                    lat='Latitude',
+                    lon='Longitude',
+                    hover_name='Name',
+                    hover_data={'City': True, 'State': True, 'Type': True, 'Latitude': False, 'Longitude': False},
+                    color='State',
+                    size_max=20,
+                    zoom=4,
+                    height=600
+                )
+                fig.update_layout(
+                    mapbox_style="open-street-map",
+                    margin={"r": 0, "t": 0, "l": 0, "b": 0}
+                )
+                st.plotly_chart(fig, use_container_width=True)
 
     # ==================== GALLERY ====================
     elif page == "Gallery":
@@ -417,7 +634,7 @@ else:
         
         col1, col2, col3 = st.columns(3)
         with col1:
-            if not museums_df.empty:
+            if not museums_df.empty and 'Type' in museums_df.columns:
                 types = ['All'] + sorted(museums_df['Type'].dropna().unique().tolist()[:20])
                 category_filter = st.selectbox("Category", types)
             else:
@@ -457,10 +674,10 @@ else:
                     with col2:
                         st.caption(f"📍 {museum['City']}")
                     
-                    if st.button(f"Book Now", key=f"book_{idx}"):
-                        st.session_state.selected_museum = museum['Name']
-                        st.session_state.current_page = 'Book Ticket'
-                        st.rerun()
+                    if st.button(f"Book Now", key=f"book_{idx}", use_container_width=True):
+                        st.info("Go to 'Book Museum' page to complete booking")
+                    
+                    st.markdown("---")
 
     # ==================== MUSEUM MAPS ====================
     elif page == "Museum Maps":
@@ -522,150 +739,16 @@ else:
                 ]
             
             for idx, (_, museum) in enumerate(display_museums.head(10).iterrows()):
-                if not search_museum or search_museum.lower() in museum['Name'].lower():
-                    with st.expander(f"📍 {museum['Name']}"):
-                        st.write(f"**Location:** {museum['City']}, {museum['State']}")
-                        st.write(f"**Type:** {museum['Type']}")
-                        est = museum['Established'] if pd.notna(museum['Established']) else 'N/A'
-                        st.write(f"**Established:** {est}")
-
-    # ==================== BOOK TICKET ====================
-    elif page == "Book Ticket":
-        st.markdown('<div class="main-header">🎫 Book Your Museum Visit</div>', unsafe_allow_html=True)
-        
-        col1, col2 = st.columns([2, 1])
-        
-        with col1:
-            st.subheader("Booking Details")
-            
-            if not museums_df.empty:
-                museums_list = sorted(museums_df['Name'].dropna().unique().tolist())
-                
-                default_idx = 0
-                if 'selected_museum' in st.session_state and st.session_state.selected_museum in museums_list:
-                    default_idx = museums_list.index(st.session_state.selected_museum)
-                
-                selected_museum = st.selectbox("Select Museum", museums_list, index=default_idx)
-                
-                museum_info = museums_df[museums_df['Name'] == selected_museum].iloc[0]
-                
-                st.info(f"📍 Location: {museum_info['City']}, {museum_info['State']}")
-                st.info(f"🎨 Type: {museum_info['Type']}")
-            
-            col_a, col_b = st.columns(2)
-            with col_a:
-                visit_date = st.date_input("Visit Date", min_value=datetime.today())
-            with col_b:
-                visit_time = st.time_input("Visit Time", value=datetime.strptime("10:00", "%H:%M").time())
-            
-            col_c, col_d = st.columns(2)
-            with col_c:
-                num_people = st.number_input("Number of People", min_value=1, max_value=50, value=1)
-            with col_d:
-                tour_type = st.selectbox("Tour Type", ["Self-Guided", "Guided Tour", "Virtual Tour", "Group Tour"])
-            
-            special_requests = st.text_area("Special Requests (Optional)", placeholder="Any special requirements or notes...")
-            
-            if st.button("Confirm Booking", use_container_width=True, type="primary"):
-                booking_id = f"BK{datetime.now().strftime('%Y%m%d%H%M%S')}"
-                
-                booking_data = {
-                    'booking_id': booking_id,
-                    'username': st.session_state.username,
-                    'museum': selected_museum,
-                    'date': visit_date.strftime('%Y-%m-%d'),
-                    'time': visit_time.strftime('%H:%M'),
-                    'people': str(num_people),
-                    'tour_type': tour_type,
-                    'booking_date': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                    'status': 'Confirmed'
-                }
-                
-                save_booking(booking_data)
-                
-                st.session_state.latest_booking = booking_data
-                st.success(f"🎉 Booking Confirmed! Your Booking ID: {booking_id}")
-                
-                qr_img = generate_qr_code(booking_data)
-                
-                st.markdown("### 📱 Your Booking QR Code")
-                st.markdown(f'<img src="data:image/png;base64,{qr_img}" width="300">', unsafe_allow_html=True)
-                st.info("💡 Save this QR code and show it at the museum entrance")
-                
-                st.download_button(
-                    label="Download QR Code",
-                    data=base64.b64decode(qr_img),
-                    file_name=f"booking_{booking_id}.png",
-                    mime="image/png"
-                )
-        
-        with col2:
-            st.subheader("📋 Booking Summary")
-            st.markdown("---")
-            
-            if 'latest_booking' in st.session_state:
-                booking = st.session_state.latest_booking
-                st.markdown(f"""
-                **Booking ID:** {booking['booking_id']}  
-                **Museum:** {booking['museum']}  
-                **Date:** {booking['date']}  
-                **Time:** {booking['time']}  
-                **People:** {booking['people']}  
-                **Tour Type:** {booking['tour_type']}  
-                **Status:** ✅ {booking['status']}
-                """)
-            else:
-                st.info("Complete the form to see your booking summary")
-            
-            st.markdown("---")
-            st.subheader("💡 Booking Tips")
-            st.markdown("""
-            - Arrive 15 minutes before your scheduled time
-            - Carry a valid ID proof
-            - Photography rules vary by museum
-            - Some museums offer discounts for students
-            - Check museum timings before visiting
-            """)
-
-    # ==================== MY BOOKINGS ====================
-    elif page == "My Bookings":
-        st.markdown('<div class="main-header">📋 My Bookings</div>', unsafe_allow_html=True)
-        
-        all_bookings = load_bookings()
-        user_bookings = [b for b in all_bookings if b['username'] == st.session_state.username]
-        
-        if not user_bookings:
-            st.info("You don't have any bookings yet. Start exploring and book your first museum visit!")
-        else:
-            st.subheader(f"Total Bookings: {len(user_bookings)}")
-            
-            for booking in reversed(user_bookings):
-                with st.expander(f"🎫 {booking['museum']} - {booking['date']}"):
-                    col1, col2 = st.columns([2, 1])
+                with st.expander(f"📍 {museum['Name']}"):
+                    st.write(f"**Location:** {museum['City']}, {museum['State']}")
+                    st.write(f"**Type:** {museum['Type']}")
+                    est = museum['Established'] if pd.notna(museum['Established']) else 'N/A'
+                    st.write(f"**Established:** {est}")
+                    if pd.notna(museum['Latitude']) and pd.notna(museum['Longitude']):
+                        st.write(f"**Coordinates:** {museum['Latitude']:.4f}, {museum['Longitude']:.4f}")
                     
-                    with col1:
-                        st.markdown(f"""
-                        **Booking ID:** {booking['booking_id']}  
-                        **Museum:** {booking['museum']}  
-                        **Date:** {booking['date']}  
-                        **Time:** {booking['time']}  
-                        **Number of People:** {booking['people']}  
-                        **Tour Type:** {booking['tour_type']}  
-                        **Booked On:** {booking['booking_date']}  
-                        **Status:** {booking['status']}
-                        """)
-                    
-                    with col2:
-                        qr_img = generate_qr_code(booking)
-                        st.markdown(f'<img src="data:image/png;base64,{qr_img}" width="200">', unsafe_allow_html=True)
-                        
-                        st.download_button(
-                            label="Download QR",
-                            data=base64.b64decode(qr_img),
-                            file_name=f"booking_{booking['booking_id']}.png",
-                            mime="image/png",
-                            key=f"dl_{booking['booking_id']}"
-                        )
+                    if st.button("🎫 Book This Museum", key=f"book_map_{idx}"):
+                        st.info("Go to 'Book Museum' page")
 
     # ==================== VIEWER PAGE ====================
     elif page == "Viewer Page":
@@ -738,8 +821,8 @@ else:
             if st.button("🔖 Bookmark This View"):
                 st.success("View bookmarked!")
             
-            if st.button("👥 Invite Friends"):
-                st.info("Share link copied to clipboard!")
+            if st.button("🎫 Book This Museum"):
+                st.info("Go to 'Book Museum' page to complete booking")
             
             st.markdown("---")
             st.subheader("🎯 Virtual Experience")
@@ -748,7 +831,7 @@ else:
         
         st.markdown("---")
         
-        tab1, tab2, tab3 = st.tabs(["📚 Museum Details", "💬 Visitor Reviews", "⭐ Ratings"])
+        tab1, tab2 = st.tabs(["📚 Museum Details", "⭐ Quick Book"])
         
         with tab1:
             if not museums_df.empty:
@@ -765,54 +848,16 @@ else:
                 col3.metric("Established", est)
         
         with tab2:
-            st.subheader("Visitor Reviews")
+            st.subheader("Quick Book This Museum")
             
-            if not bookings_df.empty and 'Review' in bookings_df.columns:
-                reviews = bookings_df[bookings_df['Review'].notna()]['Review'].head(5)
-                if len(reviews) > 0:
-                    for review in reviews:
-                        st.write(f"💬 *{review}*")
-                else:
-                    st.info("No reviews available yet. Be the first to review!")
-            
-            rating = st.slider("Rate your virtual experience", 1, 5, 5)
-            review_text = st.text_area("Share your thoughts")
-            if st.button("Submit Review"):
-                st.success("Thank you for your feedback!")
-        
-        with tab3:
-            st.subheader("Museum Ratings")
-            
-            if not bookings_df.empty and 'Rating' in bookings_df.columns:
-                ratings = bookings_df['Rating'].dropna()
-                if len(ratings) > 0:
-                    avg_rating = ratings.mean()
-                    rating_counts = ratings.value_counts().sort_index()
-                    
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.metric("Average Rating", f"{avg_rating:.1f}⭐")
-                        st.metric("Total Reviews", len(ratings))
-                    
-                    with col2:
-                        fig = px.bar(
-                            x=rating_counts.index,
-                            y=rating_counts.values,
-                            labels={'x': 'Rating', 'y': 'Count'},
-                            title="Rating Distribution"
-                        )
-                        st.plotly_chart(fig, use_container_width=True)
-                else:
-                    st.info("No ratings available yet.")
+            if st.button("🎫 Book Now", use_container_width=True):
+                st.success("Please go to 'Book Museum' page to complete your booking")
 
-# Footer
-st.markdown("---")
-museums_df = pd.read_csv('final_museums.csv', on_bad_lines='skip', encoding='utf-8')
-bookings_df = pd.read_csv('bookings_DBS.csv', on_bad_lines='skip', encoding='utf-8')
-foreign_df = pd.read_csv('foreign.csv', on_bad_lines='skip', encoding='utf-8')
-st.markdown(f"""
-    <div style="text-align: center; color: #666; padding: 20px;">
-        <p>Virtual Museum Management System | © 2025 | Connecting art lovers worldwide</p>
-        <p>Total Museums: {len(museums_df) if not museums_df.empty else 0} | Total Bookings: {len(bookings_df) if not bookings_df.empty else 0}</p>
-    </div>
-""", unsafe_allow_html=True)
+    # Footer
+    st.markdown("---")
+    st.markdown(f"""
+        <div style="text-align: center; color: #666; padding: 20px;">
+            <p>Virtual Museum Management System | © 2025 | Connecting art lovers worldwide</p>
+            <p>Total Museums: {len(museums_df)} | Your Bookings: {len(st.session_state.user_bookings)}</p>
+        </div>
+    """, unsafe_allow_html=True)
