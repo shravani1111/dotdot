@@ -1,227 +1,658 @@
 import streamlit as st
 import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+from datetime import datetime, timedelta
+import random
 import numpy as np
 
+# Page configuration
 st.set_page_config(
-    page_title="PixelPast — Virtual Museums Guide",
-    page_icon="🖼️",
+    page_title="Virtual Museum Management System",
+    page_icon="🏛️",
     layout="wide",
+    initial_sidebar_state="expanded"
 )
 
-# --- CSS / styling (enhanced) ---
-st.markdown(
-    """
+# Custom CSS
+st.markdown("""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap');
-    html, body, [class*="css"]  {
-        font-family: 'Inter', sans-serif;
+    .main-header {
+        font-size: 3rem;
+        font-weight: bold;
+        text-align: center;
+        color: #1f77b4;
+        margin-bottom: 2rem;
     }
-    .page-bg{
-        background: linear-gradient(135deg, #071129 0%, #0f172a 25%, #0ea5a4 60%, #7c3aed 100%);
-        padding: 36px;
-        border-radius: 18px;
-        color: #e6eef8;
+    .stat-card {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        padding: 20px;
+        border-radius: 10px;
+        color: white;
+        text-align: center;
     }
-    .glass {
-        background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.02));
-        border: 1px solid rgba(255,255,255,0.06);
-        padding: 16px;
-        border-radius: 12px;
-        box-shadow: 0 8px 36px rgba(2,6,23,0.55);
-        color: #e6eef8;
-        transition: transform 0.18s ease;
+    .gallery-card {
+        border: 2px solid #ddd;
+        border-radius: 10px;
+        padding: 15px;
+        margin: 10px 0;
+        transition: transform 0.3s;
     }
-    .glass:hover { transform: translateY(-6px); }
-    .muted { color: #cfeef5; opacity:0.9; }
-    .small { font-size:13px; color:#dff7fb; opacity:0.9; }
-    .title { font-weight:700; font-size:20px; margin-bottom:4px; color:#fff; }
-    .subtitle { font-size:13px; color:#d0f7fb; opacity:0.9; }
-    .hero-cta { background: linear-gradient(90deg,#7c3aed,#06b6d4); color:white; padding:8px 14px; border-radius:10px; font-weight:600; }
-    .footer { font-size:13px; color:#d2eefe; opacity:0.8; }
+    .gallery-card:hover {
+        transform: scale(1.02);
+        box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+    }
     </style>
-    """,
-    unsafe_allow_html=True,
-)
+""", unsafe_allow_html=True)
 
-# --- Sidebar navigation ---
-page = st.sidebar.selectbox("Navigate", ["Home", "Platform Statistics", "Gallery", "Museum Map"])
-st.sidebar.markdown("---")
-st.sidebar.write("Made with ❤️ for curious minds")
+# Initialize session state
+if 'current_page' not in st.session_state:
+    st.session_state.current_page = 'Home'
 
-# --- Header (reusable) ---
-def render_header():
-    st.markdown('<div class="page-bg">', unsafe_allow_html=True)
-    cols = st.columns([1, 4, 1])
-    with cols[0]:
-        st.image("https://images.unsplash.com/photo-1509099836639-18ba1be8b9f8?w=800&q=80", width=70)
-    with cols[1]:
-        st.markdown('<div style="display:flex;align-items:center;gap:8px;">'
-                    '<div style="font-size:28px;font-weight:700;color:#fff">PixelPast</div>'
-                    '<div style="font-size:14px;color:#dff7fb;opacity:0.9;padding-top:6px">Virtual Museums Guide</div>'
-                    '</div>', unsafe_allow_html=True)
-        st.markdown('<div class="muted">Explore digitized museum experiences, featured collections and guided virtual tours — beautifully curated.</div>', unsafe_allow_html=True)
-    with cols[2]:
-        st.button("Sign in", key="signin", help="Sign in to save favorites")
-    st.markdown('</div>', unsafe_allow_html=True)
-
-# --- Data for trending museums (with coords for the map) ---
-museums = [
-    {
-        "id": "renaissance",
-        "name": "Renaissance Gallery",
-        "img": "https://images.unsplash.com/photo-1526318472351-c75fcf0700d0?w=1200&q=80",
-        "blurb": "Curated Renaissance paintings with interactive annotations and audio guides.",
-        "details": "Step into the light of the Renaissance — detailed zoomable canvases, curator notes, and guided storylines that contextualize each masterpiece.",
-        "lat": 43.7696, "lon": 11.2558
-    },
-    {
-        "id": "tech_art",
-        "name": "Tech + Art Lab",
-        "img": "https://images.unsplash.com/photo-1515879218367-8466d910aaa4?w=1200&q=80",
-        "blurb": "A living collection blending technology with contemporary art installations.",
-        "details": "Explore AR-enabled exhibits and ephemeral installations documenting creative tech experiments across the last decade.",
-        "lat": 37.7749, "lon": -122.4194
-    },
-    {
-        "id": "ancient_world",
-        "name": "Ancient Worlds",
-        "img": "https://images.unsplash.com/photo-1549880338-65ddcdfd017b?w=1200&q=80",
-        "blurb": "Artifacts, 3D-scans and narrated timelines from ancient civilizations.",
-        "details": "High-resolution 3D models, spatial reconstructions and expert commentaries bring archaeology to your browser.",
-        "lat": 30.0444, "lon": 31.2357
-    },
-]
-
-# initialize session state for selection
-if "selected_museum" not in st.session_state:
-    st.session_state.selected_museum = None
-
-# --- Page: Home (Hero + Trending + About) ---
-if page == "Home":
-    render_header()
-    st.markdown("")  # spacer
-    st.markdown('## Trending Museums')
-    st.markdown('<div class="small muted">Handpicked virtual experiences people are loving right now</div>', unsafe_allow_html=True)
-
-    cols = st.columns(3)
-    for i, m in enumerate(museums):
-        with cols[i]:
-            st.markdown('<div class="glass">', unsafe_allow_html=True)
-            st.image(m["img"], use_container_width=True)
-            st.markdown(f'<div class="title">{m["name"]}</div>', unsafe_allow_html=True)
-            st.markdown(f'<div class="subtitle">{m["blurb"]}</div>', unsafe_allow_html=True)
-            if st.button("Learn More", key=f"learn_{m['id']}"):
-                st.session_state.selected_museum = m["id"]
-            st.markdown('</div>', unsafe_allow_html=True)
-
-    # --- Details panel for the selected museum ---
-    if st.session_state.selected_museum:
-        selected = next((x for x in museums if x["id"] == st.session_state.selected_museum), None)
-        if selected:
-            st.markdown("---")
-            detail_cols = st.columns([2, 1])
-            with detail_cols[0]:
-                st.markdown(f"### {selected['name']}")
-                st.write(selected["details"])
-                st.markdown("**What you'll find:**")
-                st.write("- High-resolution scans\n- Curated audio tours\n- Scholarly annotations\n- Interactive timelines")
-                st.markdown("[Open virtual tour →](#)  ", unsafe_allow_html=True)
-            with detail_cols[1]:
-                st.image(selected["img"], use_container_width=True)
-                if st.button("Close", key=f"close_{selected['id']}"):
-                    st.session_state.selected_museum = None
-
-    st.markdown("")  # spacer
-
-    # --- About PixelPast Section ---
-    st.markdown("## About PixelPast")
-    about_cols = st.columns([2, 1])
-    with about_cols[0]:
-        st.markdown(
-            """
-            PixelPast is a curated gateway to virtual museums and digitized collections worldwide.
-            We highlight immersive exhibits, educational tours and research-grade scans so anyone can
-            explore cultural heritage from anywhere.
-            """
-        )
-        st.markdown("**Our mission:** Preserve access — expand curiosity — inspire discovery.")
-        st.markdown("**Features:**")
-        st.write("- Curated trending exhibits\n- Deep zoom & 3D model viewers\n- Guided thematic tours\n- Educator resources and lesson plans")
-        st.markdown("Want to suggest a museum or collection? Reach out at hello@pixelpast.example")
-    with about_cols[1]:
-        st.image("https://images.unsplash.com/photo-1513938709626-033611b8cc03?w=1200&q=80", use_container_width=True)
-
-    st.markdown("---")
-    st.markdown('<div class="footer">© PixelPast — Made for curious minds. Tip: try the trending list and click Learn More for details.</div>', unsafe_allow_html=True)
-
-# --- Page: Platform Statistics ---
-elif page == "Platform Statistics":
-    render_header()
-    st.markdown("## Platform Statistics")
-    st.markdown('<div class="small muted">Live-ish metrics and recent trends</div>', unsafe_allow_html=True)
-    # sample aggregated metrics
-    total_museums = len(museums)
-    total_tours = 124  # demo value
-    monthly_visitors = 48520  # demo value
-
-    mcols = st.columns(3)
-    mcols[0].metric("Museums", total_museums, delta="+1 this week")
-    mcols[1].metric("Virtual Tours", total_tours, delta="+8%")
-    mcols[2].metric("Monthly Visitors", f"{monthly_visitors:,}", delta="+4.2%")
-
-    st.markdown("")  # spacer
-    # small trend chart (demo)
-    rng = pd.date_range(end=pd.Timestamp.today(), periods=12, freq='M')
-    data = pd.DataFrame({
-        "month": rng,
-        "visitors": np.random.randint(30000, 60000, size=12).cumsum() / 12
-    })
-    data = data.set_index("month")
-    st.line_chart(data["visitors"])
-
-    st.markdown("### Engagement by Exhibit Type")
-    bar_data = pd.DataFrame({
-        "Exhibit Type": ["Paintings", "3D Models", "AR Installations", "Mixed Media"],
-        "Views": [42000, 31000, 12000, 15000]
-    }).set_index("Exhibit Type")
-    st.bar_chart(bar_data)
-
-# --- Page: Gallery ---
-elif page == "Gallery":
-    render_header()
-    st.markdown("## Gallery")
-    st.markdown('<div class="small muted">A curated selection — click to view larger</div>', unsafe_allow_html=True)
-    gallery_images = [
-        "https://images.unsplash.com/photo-1496307042754-b4aa456c4a2d?w=1200&q=80",
-        "https://images.unsplash.com/photo-1519681393784-d120267933ba?w=1200&q=80",
-        "https://images.unsplash.com/photo-1526318472351-c75fcf0700d0?w=1200&q=80",
-        "https://images.unsplash.com/photo-1481627834876-b7833e8f5570?w=1200&q=80",
-        "https://images.unsplash.com/photo-1504198453319-5ce911bafcde?w=1200&q=80",
-        "https://images.unsplash.com/photo-1515879218367-8466d910aaa4?w=1200&q=80",
+# Generate pseudo data
+@st.cache_data
+def generate_museum_data():
+    # Museum locations
+    museums = [
+        {"name": "Metropolitan Museum", "lat": 40.7794, "lon": -73.9632, "city": "New York", "visitors": 7500000},
+        {"name": "Louvre Museum", "lat": 48.8606, "lon": 2.3376, "city": "Paris", "visitors": 9600000},
+        {"name": "British Museum", "lat": 51.5194, "lon": -0.1270, "city": "London", "visitors": 6800000},
+        {"name": "National Museum", "lat": 28.6129, "lon": 77.2295, "city": "New Delhi", "visitors": 3200000},
+        {"name": "Egyptian Museum", "lat": 30.0478, "lon": 31.2336, "city": "Cairo", "visitors": 2500000},
+        {"name": "Tokyo National Museum", "lat": 35.7188, "lon": 139.7762, "city": "Tokyo", "visitors": 2900000},
+        {"name": "Vatican Museums", "lat": 41.9065, "lon": 12.4536, "city": "Vatican City", "visitors": 6800000},
+        {"name": "Smithsonian", "lat": 38.8913, "lon": -77.0261, "city": "Washington DC", "visitors": 5400000},
+        {"name": "Rijksmuseum", "lat": 52.3600, "lon": 4.8852, "city": "Amsterdam", "visitors": 2700000},
+        {"name": "Prado Museum", "lat": 40.4138, "lon": -3.6921, "city": "Madrid", "visitors": 3200000},
     ]
-    cols = st.columns(3)
-    for i, img in enumerate(gallery_images):
-        with cols[i % 3]:
-            st.image(img, use_container_width=True)
+    
+    # Daily visitors data
+    dates = pd.date_range(end=datetime.now(), periods=365, freq='D')
+    daily_data = pd.DataFrame({
+        'Date': dates,
+        'Visitors': [random.randint(15000, 35000) for _ in range(365)],
+        'Online_Visitors': [random.randint(8000, 20000) for _ in range(365)],
+        'Ticket_Sales': [random.randint(200000, 500000) for _ in range(365)]
+    })
+    
+    # Category visits
+    categories = ['Ancient Art', 'Modern Art', 'Sculpture', 'Photography', 'History', 'Science']
+    category_data = pd.DataFrame({
+        'Category': categories,
+        'Visits': [random.randint(50000, 200000) for _ in categories],
+        'Avg_Duration_Min': [random.randint(20, 90) for _ in categories]
+    })
+    
+    return pd.DataFrame(museums), daily_data, category_data
+
+museums_df, daily_visitors, category_visits = generate_museum_data()
+
+# Sidebar navigation
+st.sidebar.title("🏛️ Navigation")
+page = st.sidebar.radio("Go to", ["Home", "Platform Statistics", "Gallery", "Museum Maps", "Viewer Page"])
+
+# ==================== HOME PAGE ====================
+if page == "Home":
+    st.markdown('<div class="main-header">🏛️ Virtual Museum Management System</div>', unsafe_allow_html=True)
+    st.markdown("### Welcome to the Digital Museum Experience")
+    
+    # Key metrics
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.markdown("""
+            <div class="stat-card">
+                <h2>7.2M</h2>
+                <p>Total Visitors This Year</p>
+            </div>
+        """, unsafe_allow_html=True)
+    
+    with col2:
+        st.markdown("""
+            <div class="stat-card">
+                <h2>156</h2>
+                <p>Active Museums</p>
+            </div>
+        """, unsafe_allow_html=True)
+    
+    with col3:
+        st.markdown("""
+            <div class="stat-card">
+                <h2>45K+</h2>
+                <p>Artworks Digitized</p>
+            </div>
+        """, unsafe_allow_html=True)
+    
+    with col4:
+        st.markdown("""
+            <div class="stat-card">
+                <h2>89%</h2>
+                <p>Satisfaction Rate</p>
+            </div>
+        """, unsafe_allow_html=True)
+    
     st.markdown("---")
-    st.caption("Gallery images are curated for inspiration. Use the map to find museum locations.")
+    
+    # Interactive visitor trends
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        st.subheader("📊 Visitor Trends - Last 365 Days")
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=daily_visitors['Date'],
+            y=daily_visitors['Visitors'],
+            mode='lines',
+            name='Physical Visitors',
+            line=dict(color='#1f77b4', width=2),
+            fill='tozeroy'
+        ))
+        fig.add_trace(go.Scatter(
+            x=daily_visitors['Date'],
+            y=daily_visitors['Online_Visitors'],
+            mode='lines',
+            name='Online Visitors',
+            line=dict(color='#ff7f0e', width=2),
+            fill='tozeroy'
+        ))
+        fig.update_layout(
+            height=400,
+            hovermode='x unified',
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    
+    with col2:
+        st.subheader("🎯 Category Performance")
+        fig = px.pie(
+            category_visits,
+            values='Visits',
+            names='Category',
+            hole=0.4,
+            color_discrete_sequence=px.colors.sequential.RdBu
+        )
+        fig.update_layout(height=400, showlegend=True)
+        st.plotly_chart(fig, use_container_width=True)
+    
+    # Monthly comparison
+    st.subheader("📈 Monthly Visitor Analysis")
+    monthly_data = daily_visitors.copy()
+    monthly_data['Month'] = monthly_data['Date'].dt.to_period('M').astype(str)
+    monthly_summary = monthly_data.groupby('Month').agg({
+        'Visitors': 'sum',
+        'Online_Visitors': 'sum',
+        'Ticket_Sales': 'sum'
+    }).reset_index()
+    
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=monthly_summary['Month'],
+        y=monthly_summary['Visitors'],
+        name='Physical',
+        marker_color='#1f77b4'
+    ))
+    fig.add_trace(go.Bar(
+        x=monthly_summary['Month'],
+        y=monthly_summary['Online_Visitors'],
+        name='Online',
+        marker_color='#ff7f0e'
+    ))
+    fig.update_layout(barmode='group', height=350)
+    st.plotly_chart(fig, use_container_width=True)
+    
+    # Interactive heatmap
+    st.subheader("🗺️ Global Museum Network")
+    fig = px.scatter_geo(
+        museums_df,
+        lat='lat',
+        lon='lon',
+        hover_name='name',
+        hover_data={'city': True, 'visitors': ':,', 'lat': False, 'lon': False},
+        size='visitors',
+        color='visitors',
+        color_continuous_scale='Viridis',
+        size_max=40,
+        title="Museums by Annual Visitors"
+    )
+    fig.update_layout(height=450)
+    st.plotly_chart(fig, use_container_width=True)
 
-# --- Page: Museum Map ---
-elif page == "Museum Map":
-    render_header()
-    st.markdown("## Museum Map")
-    st.markdown('<div class="small muted">Locate trending museums across the globe</div>', unsafe_allow_html=True)
-    # prepare map data
-    map_df = pd.DataFrame([{"lat": m["lat"], "lon": m["lon"], "name": m["name"]} for m in museums])
-    st.map(map_df[["lat", "lon"]])
+# ==================== PLATFORM STATISTICS ====================
+elif page == "Platform Statistics":
+    st.markdown('<div class="main-header">📊 Platform Statistics</div>', unsafe_allow_html=True)
+    
+    # Filters
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        date_range = st.selectbox("Time Period", ["Last 7 Days", "Last 30 Days", "Last 90 Days", "Last Year"])
+    with col2:
+        metric_type = st.selectbox("Metric Type", ["Visitors", "Revenue", "Engagement"])
+    with col3:
+        museum_filter = st.multiselect("Filter Museums", museums_df['name'].tolist(), default=museums_df['name'].tolist()[:3])
+    
+    # KPIs
+    col1, col2, col3, col4, col5 = st.columns(5)
+    col1.metric("Avg Daily Visitors", "24,567", "+12.3%")
+    col2.metric("Peak Day", "35,892", "Saturday")
+    col3.metric("Conversion Rate", "67.8%", "+5.2%")
+    col4.metric("Avg Session Time", "42 min", "+8 min")
+    col5.metric("Revenue", "$4.2M", "+18%")
+    
+    st.markdown("---")
+    
+    # Detailed analytics
+    tab1, tab2, tab3, tab4 = st.tabs(["📈 Visitor Analytics", "💰 Revenue Breakdown", "⏱️ Time Analysis", "🎨 Content Performance"])
+    
+    with tab1:
+        col1, col2 = st.columns(2)
+        with col1:
+            # Visitor demographics
+            st.subheader("Visitor Demographics")
+            demo_data = pd.DataFrame({
+                'Age Group': ['18-24', '25-34', '35-44', '45-54', '55+'],
+                'Percentage': [15, 28, 25, 20, 12]
+            })
+            fig = px.bar(demo_data, x='Age Group', y='Percentage', color='Percentage',
+                        color_continuous_scale='Blues')
+            st.plotly_chart(fig, use_container_width=True)
+        
+        with col2:
+            # Device usage
+            st.subheader("Device Distribution")
+            device_data = pd.DataFrame({
+                'Device': ['Mobile', 'Desktop', 'Tablet'],
+                'Users': [45, 38, 17]
+            })
+            fig = px.pie(device_data, values='Users', names='Device', hole=0.3)
+            st.plotly_chart(fig, use_container_width=True)
+        
+        # Hourly traffic
+        st.subheader("Hourly Traffic Pattern")
+        hours = list(range(24))
+        traffic = [random.randint(200, 3000) for _ in hours]
+        fig = go.Figure(go.Bar(x=hours, y=traffic, marker_color='lightblue'))
+        fig.update_layout(xaxis_title="Hour of Day", yaxis_title="Visitors")
+        st.plotly_chart(fig, use_container_width=True)
+    
+    with tab2:
+        col1, col2 = st.columns(2)
+        with col1:
+            st.subheader("Revenue by Category")
+            revenue_data = pd.DataFrame({
+                'Category': ['Tickets', 'Memberships', 'Gift Shop', 'Events', 'Donations'],
+                'Revenue': [1200000, 850000, 450000, 380000, 320000]
+            })
+            fig = px.treemap(revenue_data, path=['Category'], values='Revenue',
+                           color='Revenue', color_continuous_scale='Greens')
+            st.plotly_chart(fig, use_container_width=True)
+        
+        with col2:
+            st.subheader("Monthly Revenue Trend")
+            months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun']
+            revenue = [320000, 380000, 410000, 390000, 450000, 480000]
+            fig = go.Figure(go.Scatter(x=months, y=revenue, mode='lines+markers',
+                                      line=dict(color='green', width=3)))
+            st.plotly_chart(fig, use_container_width=True)
+    
+    with tab3:
+        st.subheader("Average Time Spent by Exhibit")
+        exhibits = ['Ancient Egypt', 'Renaissance', 'Modern Art', 'Natural History', 'Space']
+        times = [45, 38, 52, 41, 36]
+        fig = go.Figure(go.Bar(x=exhibits, y=times, marker_color='coral'))
+        fig.update_layout(yaxis_title="Minutes")
+        st.plotly_chart(fig, use_container_width=True)
+        
+        st.subheader("Visit Duration Distribution")
+        durations = np.random.normal(40, 15, 1000)
+        fig = px.histogram(x=durations, nbins=30, labels={'x': 'Duration (minutes)', 'y': 'Count'})
+        st.plotly_chart(fig, use_container_width=True)
+    
+    with tab4:
+        st.subheader("Most Popular Artworks")
+        artwork_data = pd.DataFrame({
+            'Artwork': ['Mona Lisa', 'Starry Night', 'The Thinker', 'David', 'The Scream'],
+            'Views': [125000, 98000, 87000, 76000, 69000],
+            'Likes': [45000, 38000, 32000, 28000, 25000]
+        })
+        fig = px.scatter(artwork_data, x='Views', y='Likes', size='Views', 
+                        color='Artwork', hover_name='Artwork', size_max=50)
+        st.plotly_chart(fig, use_container_width=True)
 
-    st.markdown("### Museums")
-    for m in museums:
-        with st.expander(m["name"]):
-            st.write(m["blurb"])
-            st.image(m["img"], use_container_width=True)
-            if st.button("View on Home", key=f"goto_{m['id']}"):
-                # navigate back to Home and open detail
-                st.session_state.selected_museum = m["id"]
-                # simple navigation by reloading page selection
-                st.experimental_rerun()
+# ==================== GALLERY ====================
+elif page == "Gallery":
+    st.markdown('<div class="main-header">🎨 Interactive Gallery</div>', unsafe_allow_html=True)
+    
+    # Gallery categories
+    gallery_items = [
+        {
+            "title": "Mona Lisa",
+            "artist": "Leonardo da Vinci",
+            "year": "1503-1519",
+            "category": "Renaissance",
+            "description": "The most famous portrait in the world, known for her enigmatic smile.",
+            "views": "125K",
+            "likes": "45K"
+        },
+        {
+            "title": "The Starry Night",
+            "artist": "Vincent van Gogh",
+            "year": "1889",
+            "category": "Post-Impressionism",
+            "description": "A swirling night sky over a French village, painted from memory.",
+            "views": "98K",
+            "likes": "38K"
+        },
+        {
+            "title": "The Thinker",
+            "artist": "Auguste Rodin",
+            "year": "1904",
+            "category": "Sculpture",
+            "description": "Bronze sculpture depicting a nude male figure in deep contemplation.",
+            "views": "87K",
+            "likes": "32K"
+        },
+        {
+            "title": "Girl with a Pearl Earring",
+            "artist": "Johannes Vermeer",
+            "year": "1665",
+            "category": "Baroque",
+            "description": "Often called the 'Mona Lisa of the North', featuring exotic dress and a luminous pearl.",
+            "views": "76K",
+            "likes": "29K"
+        },
+        {
+            "title": "The Scream",
+            "artist": "Edvard Munch",
+            "year": "1893",
+            "category": "Expressionism",
+            "description": "An iconic image of anxiety and existential dread in modern art.",
+            "views": "69K",
+            "likes": "25K"
+        },
+        {
+            "title": "The Birth of Venus",
+            "artist": "Sandro Botticelli",
+            "year": "1485",
+            "category": "Renaissance",
+            "description": "Depicts the goddess Venus emerging from the sea upon a shell.",
+            "views": "64K",
+            "likes": "23K"
+        }
+    ]
+    
+    # Filter options
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        category_filter = st.selectbox("Category", ["All"] + list(set([item['category'] for item in gallery_items])))
+    with col2:
+        sort_by = st.selectbox("Sort By", ["Views", "Likes", "Year"])
+    with col3:
+        search = st.text_input("🔍 Search artworks", "")
+    
+    # Filter gallery items
+    filtered_items = gallery_items
+    if category_filter != "All":
+        filtered_items = [item for item in filtered_items if item['category'] == category_filter]
+    if search:
+        filtered_items = [item for item in filtered_items if search.lower() in item['title'].lower() or search.lower() in item['artist'].lower()]
+    
+    # Display gallery in grid
+    cols = st.columns(3)
+    for idx, item in enumerate(filtered_items):
+        with cols[idx % 3]:
+            with st.container():
+                st.markdown(f"""
+                    <div class="gallery-card">
+                        <h3>{item['title']}</h3>
+                        <p><strong>{item['artist']}</strong> • {item['year']}</p>
+                        <p style="color: #666; font-size: 0.9em;">{item['category']}</p>
+                    </div>
+                """, unsafe_allow_html=True)
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.caption(f"👁️ {item['views']} views")
+                with col2:
+                    st.caption(f"❤️ {item['likes']} likes")
+                
+                if st.button(f"Learn More", key=f"learn_{idx}"):
+                    with st.expander("ℹ️ Details", expanded=True):
+                        st.write(f"**Description:** {item['description']}")
+                        st.write(f"**Period:** {item['category']}")
+                        st.write(f"**Created:** {item['year']}")
+                        
+                        # Interactive options
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            if st.button("❤️ Like", key=f"like_{idx}"):
+                                st.success("Added to favorites!")
+                        with col2:
+                            if st.button("🔗 Share", key=f"share_{idx}"):
+                                st.info("Share link copied!")
+                        with col3:
+                            if st.button("💬 Comment", key=f"comment_{idx}"):
+                                st.text_area("Your comment:", key=f"comment_area_{idx}")
+                
+                st.markdown("---")
+
+# ==================== MUSEUM MAPS ====================
+elif page == "Museum Maps":
+    st.markdown('<div class="main-header">🗺️ Museum Locations</div>', unsafe_allow_html=True)
+    
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        st.subheader("Global Museum Network")
+        
+        # Interactive map with plotly
+        fig = px.scatter_geo(
+            museums_df,
+            lat='lat',
+            lon='lon',
+            hover_name='name',
+            hover_data={
+                'city': True,
+                'visitors': ':,',
+                'lat': False,
+                'lon': False
+            },
+            size='visitors',
+            color='visitors',
+            color_continuous_scale='Plasma',
+            size_max=50,
+            projection='natural earth'
+        )
+        
+        fig.update_layout(
+            height=600,
+            geo=dict(
+                showland=True,
+                landcolor='rgb(243, 243, 243)',
+                coastlinecolor='rgb(204, 204, 204)',
+                projection_type='natural earth',
+                showlakes=True,
+                lakecolor='rgb(200, 220, 240)',
+            )
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+    
+    with col2:
+        st.subheader("Museum Directory")
+        
+        # Search and filter
+        search_museum = st.text_input("🔍 Search museum")
+        
+        # Display museum list
+        for idx, row in museums_df.iterrows():
+            if not search_museum or search_museum.lower() in row['name'].lower():
+                with st.expander(f"📍 {row['name']}"):
+                    st.write(f"**Location:** {row['city']}")
+                    st.write(f"**Annual Visitors:** {row['visitors']:,}")
+                    st.write(f"**Coordinates:** {row['lat']:.4f}, {row['lon']:.4f}")
+                    
+                    if st.button("Get Directions", key=f"dir_{idx}"):
+                        st.info(f"Opening directions to {row['name']}...")
+    
+    # Statistics by region
+    st.markdown("---")
+    st.subheader("Regional Analysis")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        # Top museums by visitors
+        fig = px.bar(
+            museums_df.sort_values('visitors', ascending=False).head(10),
+            x='visitors',
+            y='name',
+            orientation='h',
+            title="Top 10 Museums by Visitors",
+            color='visitors',
+            color_continuous_scale='Blues'
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    
+    with col2:
+        # Distribution by continent (simplified)
+        continent_data = pd.DataFrame({
+            'Continent': ['Europe', 'North America', 'Asia', 'Africa', 'South America'],
+            'Museums': [35, 28, 22, 8, 7]
+        })
+        fig = px.pie(continent_data, values='Museums', names='Continent',
+                    title="Museum Distribution by Continent")
+        st.plotly_chart(fig, use_container_width=True)
+
+# ==================== VIEWER PAGE ====================
+elif page == "Viewer Page":
+    st.markdown('<div class="main-header">👁️ Virtual Museum Viewer</div>', unsafe_allow_html=True)
+    
+    st.markdown("""
+        ### Experience Museums in 3D Virtual Reality
+        Explore our curated collections from anywhere in the world.
+    """)
+    
+    # Virtual tour options
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        st.subheader("🎮 Virtual Tour Controls")
+        
+        tour_type = st.radio(
+            "Select Tour Type",
+            ["Guided Tour", "Free Exploration", "Audio Tour", "Educational Tour"],
+            horizontal=True
+        )
+        
+        museum_select = st.selectbox("Choose Museum", museums_df['name'].tolist())
+        
+        # Simulation of 3D viewer
+        st.markdown("""
+            <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                        height: 400px; border-radius: 15px; display: flex; 
+                        align-items: center; justify-content: center; color: white;">
+                <div style="text-align: center;">
+                    <h2>🎨 360° Virtual Gallery View</h2>
+                    <p style="font-size: 1.2em;">Interactive 3D Experience</p>
+                    <p>Use mouse to navigate • Click artworks for details</p>
+                </div>
+            </div>
+        """, unsafe_allow_html=True)
+        
+        # Controls
+        st.markdown("### Navigation Controls")
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.button("⬅️ Rotate Left")
+        with col2:
+            st.button("➡️ Rotate Right")
+        with col3:
+            st.button("⬆️ Zoom In")
+        with col4:
+            st.button("⬇️ Zoom Out")
+    
+    with col2:
+        st.subheader("📋 Tour Information")
+        
+        st.info(f"""
+        **Current Location:** {museum_select}
+        
+        **Tour Duration:** 45 minutes
+        
+        **Artworks:** 24 pieces
+        
+        **Audio:** Available
+        """)
+        
+        st.markdown("### Quick Actions")
+        if st.button("🎧 Enable Audio Guide"):
+            st.success("Audio guide activated!")
+        
+        if st.button("📷 Take Screenshot"):
+            st.success("Screenshot saved to gallery!")
+        
+        if st.button("🔖 Bookmark This View"):
+            st.success("View bookmarked!")
+        
+        if st.button("👥 Invite Friends"):
+            st.info("Share link copied to clipboard!")
+        
+        st.markdown("---")
+        st.subheader("🎯 Current Exhibit")
+        st.write("**Renaissance Masters**")
+        st.write("Room 3 of 8")
+        st.progress(0.375)
+    
+    # Additional features
+    st.markdown("---")
+    
+    tab1, tab2, tab3 = st.tabs(["📚 Exhibit Details", "💬 Live Chat", "⭐ Reviews"])
+    
+    with tab1:
+        st.subheader("About This Exhibit")
+        st.write("""
+        The Renaissance Masters collection features works from the 14th to 17th century,
+        showcasing the revolutionary artistic techniques that defined the era. This exhibit
+        includes pieces from Leonardo da Vinci, Michelangelo, Raphael, and other influential
+        artists who transformed European art.
+        """)
+        
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Artworks", "24")
+        col2.metric("Period", "14th-17th Century")
+        col3.metric("Avg Rating", "4.8/5.0")
+    
+    with tab2:
+        st.subheader("Live Tour Chat")
+        st.text_input("Ask the curator anything...", key="chat_input")
+        
+        # Simulated chat
+        st.markdown("""
+        **Guide:** Welcome to the Renaissance exhibit! Feel free to ask questions.
+        
+        **Visitor123:** What technique did da Vinci use for the Mona Lisa?
+        
+        **Guide:** Great question! Da Vinci used sfumato, a technique of subtle gradations...
+        """)
+    
+    with tab3:
+        st.subheader("Visitor Reviews")
+        
+        # Rating
+        rating = st.slider("Rate your experience", 1, 5, 5)
+        review_text = st.text_area("Share your thoughts")
+        if st.button("Submit Review"):
+            st.success("Thank you for your feedback!")
+        
+        st.markdown("---")
+        st.write("**Recent Reviews:**")
+        st.write("⭐⭐⭐⭐⭐ *Amazing virtual experience! Felt like I was really there.* - User A")
+        st.write("⭐⭐⭐⭐ *Great collection, easy to navigate.* - User B")
+
+# Footer
+st.markdown("---")
+st.markdown("""
+    <div style="text-align: center; color: #666; padding: 20px;">
+        <p>Virtual Museum Management System | © 2025 | Connecting art lovers worldwide</p>
+    </div>
+""", unsafe_allow_html=True)
