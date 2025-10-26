@@ -10,6 +10,34 @@ from io import BytesIO
 import base64
 import json
 import os
+from PIL import Image
+
+def resize_and_convert_image(image_path, target_size=(400, 300)):
+    """Resize image to target size while maintaining aspect ratio"""
+    try:
+        with Image.open(image_path) as img:
+            # Convert to RGB if needed
+            if img.mode != 'RGB':
+                img = img.convert('RGB')
+            
+            # Calculate aspect ratio preserving dimensions
+            img.thumbnail(target_size, Image.Resampling.LANCZOS)
+            
+            # Create new image with exact dimensions
+            new_img = Image.new("RGB", target_size, (255, 255, 255))
+            
+            # Paste resized image in center
+            offset = ((target_size[0] - img.size[0]) // 2,
+                     (target_size[1] - img.size[1]) // 2)
+            new_img.paste(img, offset)
+            
+            # Save to BytesIO
+            buffered = BytesIO()
+            new_img.save(buffered, format="JPEG", quality=85)
+            return base64.b64encode(buffered.getvalue()).decode()
+    except Exception as e:
+        st.error(f"Error processing image: {e}")
+        return None
 
 # Page configuration
 st.set_page_config(
@@ -29,7 +57,13 @@ st.markdown("""
         color: #1f77b4;
         margin-bottom: 2rem;
     }
-    .stat-card {
+    .stat-ca                    # Load and display museum image with consistent sizing
+                    img_url = f"gallery/{(museum['Name'])}.jpg"
+                    try:
+                        st.markdown(f'<div style="height: 250px; overflow: hidden;"><img src="{img_url}" class="museum-image" /></div>', unsafe_allow_html=True)
+                    except:
+                        # Fallback to placeholder if image not found
+                        st.markdown(f'<div style="height: 250px; overflow: hidden; background: #f0f0f0; display: flex; align-items: center; justify-content: center;"><p>🏛️</p></div>', unsafe_allow_html=True){
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         padding: 20px;
         border-radius: 10px;
@@ -46,6 +80,13 @@ st.markdown("""
     .gallery-card:hover {
         transform: scale(1.02);
         box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+    }
+    .museum-image {
+        width: 100%;
+        height: 250px;
+        object-fit: cover;
+        border-radius: 8px;
+        margin-bottom: 10px;
     }
     .login-box {
         max-width: 400px;
@@ -659,6 +700,23 @@ else:
         for idx, (_, museum) in enumerate(filtered_museums_gallery.head(18).iterrows()):
             with cols[idx % 3]:
                 with st.container():
+                    # Load and resize museum image
+                    img_path = f"gallery/{(museum['Name'])}.jpg"
+                    try:
+                        img_data = resize_and_convert_image(img_path, target_size=(400, 300))
+                        if img_data:
+                            st.markdown(f'<img src="data:image/jpeg;base64,{img_data}" style="width:100%; height:300px; object-fit:cover; border-radius:8px;">', unsafe_allow_html=True)
+                        else:
+                            raise FileNotFoundError
+                    except:
+                        # Fallback to placeholder if image not found or error occurs
+                        st.markdown(
+                            '<div style="width:100%; height:300px; background:#f0f0f0; display:flex; align-items:center; justify-content:center; border-radius:8px;">'
+                            '<span style="font-size:48px;">🏛️</span>'
+                            '</div>',
+                            unsafe_allow_html=True
+                        )
+                    
                     st.markdown(f"""
                         <div class="gallery-card">
                             <h3>{museum['Name']}</h3>
